@@ -1,0 +1,253 @@
+#!/usr/bin/env bash
+
+VERSION="Chainz 1.4 (Major Update)"
+cmd="$1"
+pkg="$2"
+
+# --------------------------
+# Update notes (notes)
+# --------------------------
+if [[ "$cmd" == "notes" ]]; then
+    echo "These are the 1.2.1 update notes:"
+    echo "1. New UI upgrades With fzf"
+    echo "2. Readition of flatpak"
+    exit 1;
+fi
+
+# --------------------------
+# Check Dependencies
+# --------------------------
+command -v fzf >/dev/null 2>&1 || {
+    echo "fzf not installed"
+    echo "To install fzf run:"
+    echo "sudo pacman -S fzf"
+    exit 1;
+}
+
+# Check for Yay (for AUR packages)
+command -v yay >/dev/null 2>&1 || {
+    echo "yay not installed"
+    echo "To install yay run:"
+    echo "sudo pacman -S yay"
+    exit 1;
+}
+
+# --------------------------
+# Version
+# --------------------------
+if [[ "$cmd" == "-v" || "$cmd" == "--version" || "$cmd" == "version" ]]; then
+    echo "$VERSION"
+    exit 0
+fi
+
+# --------------------------
+# Interactive Mode (Now fzf)
+# --------------------------
+if [[ -z "$cmd" ]]; then
+    cmd=$(printf "Install packages\nRemove packages\nUpgrade packages\nExit" | \
+        fzf --prompt="What do you want to do? > " --height=10% --reverse --border)
+
+    case "$cmd" in
+        "Install packages")
+            cmd="-I"
+            ;;
+        "Remove packages")
+            cmd="-R"
+            ;;
+        "Upgrade packages")
+            cmd="-U"
+            ;;
+        "Exit"|"")
+            exit 0
+            ;;
+        *)
+            echo -e "\e[31mInvalid Choice"
+            exit 1
+            ;;
+    esac
+fi
+
+# -------------------------
+# Update/Upgrade (-U)
+# -------------------------
+if [[ "$cmd" == "-U" || "$cmd" == "upgrade" ]]; then
+    echo "=== Chainz System Upgrade ==="
+    echo
+
+    echo "→ Updating pacman packages..."
+    sudo pacman -Syu --noconfirm || { echo "Pacman update failed"; exit 1; }
+
+    echo
+    echo "→ Updating Yay (AUR) packages..."
+    yay -Syu --noconfirm || { echo "Yay update failed"; exit 1; }
+
+    echo
+    echo "=== All package managers updated ==="
+    exit 0
+fi
+
+# -------------------------
+# Help (--help)
+# -------------------------
+if [[ "$cmd" == "--help" || "$cmd" == "-h" || "$cmd" == "help" ]]; then
+    echo "Chainz - Universal Arch Package Manager Wrapper"
+    echo "Chainz Version: $VERSION"
+    echo
+    echo "Usage:"
+    echo "  chainz -I <package>        Install a package"
+    echo "  chainz -R <package>        Remove a package"
+    echo "  chainz -U                  Update all packages"
+    echo "  chainz -h                  Show this help"
+    echo "  chainz -v                  Show version"
+    echo "  chainz notes               Show update notes"
+    exit 0
+fi
+
+# -------------------------
+# Remove (-R)
+# -------------------------
+if [[ "$cmd" == "-R" || "$cmd" == "remove" ]]; then
+
+    # Check if fzf is installed
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "fzf not found. Installing it..."
+        sudo pacman -S --noconfirm fzf
+    fi
+
+    # Ask user if they want to remove Pacman or Flatpak package
+    echo "Select package type to remove:"
+    pkg_type=$(printf "Pacman\nFlatpak" | fzf --prompt="Type> " --height 10% --reverse --border)
+
+    if [[ "$pkg_type" == "Pacman" ]]; then
+        # List installed pacman packages
+        mapfile -t pacman_pkgs < <(pacman -Q | awk '{print $1}')
+        if [[ ${#pacman_pkgs[@]} -eq 0 ]]; then
+            echo "\e[31mNo pacman packages installed."
+            exit 1
+        fi
+
+        # Use fzf to select package
+        echo "Select Pacman package to remove (start typing to fuzzy search):"
+        pkg_to_remove=$(printf "%s\n" "${pacman_pkgs[@]}" | fzf --prompt="Package> " --height 10% --reverse --border)
+
+        if [[ -z "$pkg_to_remove" ]]; then
+            echo "No package selected."
+            exit 1
+        fi
+
+        echo "Removing package: $pkg_to_remove"
+        sudo pacman -R "$pkg_to_remove" || { echo "Pacman removal failed"; exit 1; }
+
+    elif [[ "$pkg_type" == "Flatpak" ]]; then
+        # List installed flatpak applications
+        mapfile -t flatpak_pkgs < <(flatpak list --app --columns=application)
+
+        if [[ ${#flatpak_pkgs[@]} -eq 0 ]]; then
+            echo "No Flatpak packages installed."
+            exit 1
+        fi
+
+        # Use fzf to select package
+        echo "Select Flatpak package to remove (start typing to fuzzy search):"
+        pkg_to_remove=$(printf "%s\n" "${flatpak_pkgs[@]}" | fzf --prompt="Package> " --height 10% --reverse --border)
+
+        if [[ -z "$pkg_to_remove" ]]; then
+            echo "No package selected."
+            exit 1
+        fi
+
+        echo "Removing Flatpak package: $pkg_to_remove"
+        flatpak uninstall -y "$pkg_to_remove" || { echo "Flatpak removal failed"; exit 1; }
+
+    else
+        echo "No package type selected."
+        exit 1
+    fi
+
+    exit 0
+fi
+
+# -------------------------
+# Install (-I)
+# -------------------------
+if [[ "$cmd" == "-I" || "$cmd" == "install" ]]; then
+
+    # Check if fzf is installed
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo "fzf not found. Installing it..."
+        sudo pacman -S --noconfirm fzf
+    fi
+
+    # Ask which package manager to use
+    echo "Select the package manager:"
+    manager=$(printf "%s\n" "Pacman (Arch)" "Yay (Arch)" "Flatpak (Universal)" "Apt (Ubuntu)" | fzf --prompt="Package manager> " --height 10% --reverse --border)
+
+    if [[ -z "$manager" ]]; then
+        echo "No package manager selected."
+        exit 1
+    fi
+
+    # Fetch package list and fuzzy find
+    case "$manager" in
+        "Pacman (Arch)")
+            echo "Fetching Pacman packages..."
+            pkgs=($(pacman -Sl | awk '{print $2}'))
+            ;;
+        "Yay (Arch)")
+            echo "Fetching Yay (AUR) packages..."
+            pkgs=($(yay -Ssq))
+            ;;
+        "Flatpak (Universal)")
+            echo "Fetching Flatpak packages..."
+            pkgs=($(flatpak search "" | awk '{print $1}'))
+            ;;
+        "Apt (Ubuntu)")
+            if ! command -v apt >/dev/null 2>&1; then
+                echo "Apt not found. This tool is intended for Ubuntu systems."
+                exit 1
+            fi
+            echo "Fetching Apt (Ubuntu) packages..."
+            mapfile -t pkgs < <(apt list 2>/dev/null | cut -d/ -f1)
+            ;;
+
+        *)
+            echo "Invalid package manager."
+            exit 1
+            ;;
+    esac
+
+    if [[ ${#pkgs[@]} -eq 0 ]]; then
+        echo "No packages found for $manager."
+        exit 1
+    fi
+
+    # Fuzzy select the package
+    pkg=$(printf "%s\n" "${pkgs[@]}" | fzf --prompt="Select package> " --height 10% --reverse --border)
+    if [[ -z "$pkg" ]]; then
+        echo "No package selected."
+        exit 1
+    fi
+
+    # Install the selected package
+    echo "Installing $pkg via $manager..."
+    case "$manager" in
+        "Pacman (Arch)")
+            sudo pacman -S "$pkg" || { echo "Pacman installation failed"; exit 1; }
+            ;;
+        "Yay (Arch)")
+            yay -S "$pkg" || { echo "Yay installation failed"; exit 1; }
+            ;;
+        "Flatpak (Universal)")
+            flatpak install "$pkg" || { echo "Flatpak installation failed"; exit 1; }
+            ;;
+        "Apt (Ubuntu)")
+            sudo apt install "$pkg" || { echo "Apt installation failed"; exit 1; }
+            ;;
+        *)
+            echo "Invalid package manager."
+            exit 1
+            ;;
+    esac
+
+    exit 0
+fi
